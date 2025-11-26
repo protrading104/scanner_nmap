@@ -35,6 +35,14 @@ def resolve_nmap_path():
 NMAP_CMD = None
 DNS_SERVERS = []
 
+
+def init_worker(nmap_cmd, dns_servers):
+    """Configure global settings inside worker processes."""
+
+    global NMAP_CMD, DNS_SERVERS
+    NMAP_CMD = nmap_cmd
+    DNS_SERVERS = dns_servers
+
 ress = {
 "rdp": {"good": "Hosts with open RDP", "bad": "Hosts have RDP port open.", "innmap": "yes", "condition": "3389", "state": "open", "message": "no", "additional": "no"},
 "smb": {"good": "Hosts with open SMB",  "bad": "Hosts have SMB port open.", "innmap": "yes", "condition": "445", "state": "open", "message": "no", "additional": "ghost"},
@@ -152,6 +160,9 @@ def discover_dns_servers():
     return list(dict.fromkeys(server for server in servers if server))
 
 def scan(ip):
+    if not NMAP_CMD:
+        raise RuntimeError("Nmap executable path is not configured in worker process")
+
     print("[%s][>] Scanning %s ..." % (time.strftime("%H:%M:%S", time.localtime()), ip))
     hosts = {}
     cmd = [
@@ -279,7 +290,9 @@ if __name__ == "__main__":
                             threads = 60
                         print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
                         render_progress(0, total_routes)
-                        with multiprocessing.Pool(threads) as p:
+                        with multiprocessing.Pool(
+                            threads, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
+                        ) as p:
                             for idx, finished_ip in enumerate(p.imap_unordered(scan_with_label, routes), start=1):
                                 render_progress(idx, total_routes, finished_ip)
                     for i in ress:
