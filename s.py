@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import time
+import multiprocessing
 
 from rw import *
 
@@ -86,7 +87,20 @@ def clear_subnets(ips):
             break
     return ips
 
+def render_progress(current, total, last_finished=None):
+    percent = int((current / total) * 100) if total else 0
+    bar_length = 30
+    filled_length = int(bar_length * percent / 100)
+    bar = "#" * filled_length + "-" * (bar_length - filled_length)
+    progress = "[%s][=] Progress: |%s| %s%% (%s/%s)" % (
+        time.strftime("%H:%M:%S", time.localtime()), bar, percent, current, total
+    )
+    if last_finished:
+        progress += " - completed %s" % last_finished
+    print(progress)
+
 def scan(ip):
+    print("[%s][>] Scanning %s ..." % (time.strftime("%H:%M:%S", time.localtime()), ip))
     hosts = {}
     cmd = [
         NMAP_CMD,
@@ -123,6 +137,12 @@ def scan(ip):
             print(host)
         for i in ress:
             parse(i, host, hosts)
+
+    print("[%s][>] Finished %s" % (time.strftime("%H:%M:%S", time.localtime()), ip))
+
+def scan_with_label(ip):
+    scan(ip)
+    return ip
 
 def parse_res(var, string1, string2):
     try:
@@ -186,17 +206,22 @@ if __name__ == "__main__":
                     for i in routes:
                         print('   > %s' % i)
                     routes = parallel_routes(routes)
+                    total_routes = len(routes)
                     if len(routes) == 1:
                         print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), routes[0]))
+                        render_progress(0, total_routes)
                         scan(routes[0])
+                        render_progress(total_routes, total_routes, routes[0])
                     else:
                         if len(routes) < 60:
                             threads =  len(routes)
                         else:
                             threads = 60
-                        print("[%s][+] Launching multithreader scan ..."  % time.strftime("%H:%M:%S", time.localtime()))
+                        print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
+                        render_progress(0, total_routes)
                         with multiprocessing.Pool(threads) as p:
-                            p.map(scan, routes)
+                            for idx, finished_ip in enumerate(p.imap_unordered(scan_with_label, routes), start=1):
+                                render_progress(idx, total_routes, finished_ip)
                     for i in ress:
                         parse_res(i, ress[i]["good"], ress[i]["bad"])
                     old_data = new_data
