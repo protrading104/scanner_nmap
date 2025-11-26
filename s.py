@@ -1,9 +1,36 @@
-import subprocess
 import ipaddress
-import time
-import multiprocessing
 import os
+import shutil
+import subprocess
+import sys
+import time
+
 from rw import *
+
+
+def resolve_nmap_path():
+    """Return a usable path to nmap or raise a helpful error."""
+
+    env_path = os.environ.get("NMAP_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    detected = shutil.which("nmap")
+    if detected:
+        return detected
+
+    for path in (
+        r"C:\\Program Files\\Nmap\\nmap.exe",
+        r"C:\\Program Files (x86)\\Nmap\\nmap.exe",
+    ):
+        if os.path.isfile(path):
+            return path
+
+    raise FileNotFoundError(
+        "nmap executable not found. Install Nmap and/or set NMAP_PATH to the executable path."
+    )
+
+NMAP_CMD = None
 
 ress = {
 "rdp": {"good": "Hosts with open RDP", "bad": "Hosts have RDP port open.", "innmap": "yes", "condition": "3389", "state": "open", "message": "no", "additional": "no"},
@@ -61,7 +88,19 @@ def clear_subnets(ips):
 
 def scan(ip):
     hosts = {}
-    for line in str(subprocess.Popen('nmap --open -PE -T5 -p445,3389 --script smb-vuln-ms17-010 --script smb-os-discovery %s' % ip, stdout=subprocess.PIPE).stdout.read()).split('\\r\\n'):
+    cmd = [
+        NMAP_CMD,
+        "--open",
+        "-PE",
+        "-T5",
+        "-p445,3389",
+        "--script",
+        "smb-vuln-ms17-010",
+        "--script",
+        "smb-os-discovery",
+        ip,
+    ]
+    for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True).stdout.read().splitlines():
         if line.startswith('Nmap scan report for '):
             if line.count('(') == 1 and line.count(')') == 1:
                 hosts.update({line.split('(')[1].replace(')', '') : {'ResolvedName' : line.split(' ')[4]}})
@@ -112,6 +151,12 @@ def get_routes(routes):
 
 if __name__ == "__main__":
     try:
+        try:
+            NMAP_CMD = resolve_nmap_path()
+        except FileNotFoundError as exc:
+            print("[!] %s" % exc)
+            sys.exit(1)
+
         print("[%s][!] Parsing default routes ..." % time.strftime("%H:%M:%S", time.localtime()))
         default_routes, default_data = get_routes(str(subprocess.check_output("route print -4")))
         old_data = default_data
