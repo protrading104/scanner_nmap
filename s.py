@@ -290,11 +290,22 @@ if __name__ == "__main__":
                             threads = 60
                         print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
                         render_progress(0, total_routes)
-                        with multiprocessing.Pool(
+                        p = multiprocessing.Pool(
                             threads, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
-                        ) as p:
-                            for idx, finished_ip in enumerate(p.imap_unordered(scan_with_label, routes), start=1):
+                        )
+                        try:
+                            for idx, finished_ip in enumerate(
+                                p.imap_unordered(scan_with_label, routes), start=1
+                            ):
                                 render_progress(idx, total_routes, finished_ip)
+                        except KeyboardInterrupt:
+                            print("[!] User interrupted! Stopping active scans ...")
+                            p.terminate()
+                            p.join()
+                            sys.exit(1)
+                        else:
+                            p.close()
+                            p.join()
                     for i in ress:
                         parse_res(i, ress[i]["good"], ress[i]["bad"])
                     old_data = new_data
