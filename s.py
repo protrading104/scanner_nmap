@@ -97,6 +97,21 @@ def clear_subnets(ips):
             break
     return ips
 
+
+def confirm_scan(routes):
+    """Ask the user to confirm scanning the discovered routes."""
+
+    prompt = "[%s][?] Start scanning %s routes? (y/N): " % (
+        time.strftime("%H:%M:%S", time.localtime()),
+        len(routes),
+    )
+
+    while True:
+        answer = input(prompt).strip().lower()
+        if answer in ("y", "n", ""):
+            return answer == "y"
+        print("Please enter 'y' to confirm or 'n' to cancel.")
+
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
     bar_length = 30
@@ -277,6 +292,13 @@ if __name__ == "__main__":
                     for i in routes:
                         print('   > %s' % i)
                     routes = parallel_routes(routes)
+                    print("[%s][*] Final routes to scan:" % time.strftime("%H:%M:%S", time.localtime()))
+                    for route in routes:
+                        print('   > %s' % route)
+                    if not confirm_scan(routes):
+                        print("[%s][-] Scan cancelled; waiting for further route changes." % time.strftime("%H:%M:%S", time.localtime()))
+                        old_data = new_data
+                        continue
                     total_routes = len(routes)
                     if len(routes) == 1:
                         print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), routes[0]))
