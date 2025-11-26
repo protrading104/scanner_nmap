@@ -219,8 +219,19 @@ def get_routes(routes):
             s = i.split(' ')
             while s.count('') != 0:
                 s.remove('')
-            if s[1] != '255.255.255.255' and s[1] != '240.0.0.0' and s[0] != '0.0.0.0' and s[1] != '0.0.0.0' and s[0] != '127.0.0.0' and diaps.count(str(ipaddress.IPv4Network('%s/%s' % (s[0], s[1]), False))) == 0 and s[0].startswith('169.') == False and s[0].startswith('10.212.134') == False:
-                diaps.append(str(ipaddress.IPv4Network('%s/%s' % (s[0], s[1]), False)))
+            destination, netmask = s[0], s[1]
+            if (
+                netmask != '240.0.0.0'
+                and netmask != '255.255.255.255'
+                and destination != '0.0.0.0'
+                and netmask != '0.0.0.0'
+                and destination != '127.0.0.0'
+                and not destination.startswith('169.')
+                and not destination.startswith('10.212.134')
+            ):
+                network = str(ipaddress.IPv4Network('%s/%s' % (destination, netmask), False))
+                if network not in diaps:
+                    diaps.append(network)
         elif ro == False and i.count('IPv4 Route Table') == 1:
             ro = True
     return diaps, routes
