@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import multiprocessing
+import re
 
 from rw import *
 
@@ -32,6 +33,7 @@ def resolve_nmap_path():
     )
 
 NMAP_CMD = None
+DNS_SERVERS = []
 
 ress = {
 "rdp": {"good": "Hosts with open RDP", "bad": "Hosts have RDP port open.", "innmap": "yes", "condition": "3389", "state": "open", "message": "no", "additional": "no"},
@@ -99,6 +101,56 @@ def render_progress(current, total, last_finished=None):
         progress += " - completed %s" % last_finished
     print(progress)
 
+
+def discover_dns_servers():
+    """Try several strategies to locate DNS servers for nmap."""
+
+    env_value = os.environ.get("DNS_SERVERS")
+    if env_value:
+        servers = [server.strip() for server in env_value.split(",") if server.strip()]
+        if servers:
+            return servers
+
+    servers = []
+
+    if os.name == "nt":
+        try:
+            output = subprocess.check_output("ipconfig /all", text=True, errors="ignore")
+        except Exception:
+            output = ""
+
+        current_section = False
+        for line in output.splitlines():
+            if line.lower().strip().startswith("dns servers"):
+                current_section = True
+                possible = line.split(":", 1)[-1].strip()
+                if possible:
+                    servers.append(possible)
+                continue
+
+            if current_section:
+                stripped = line.strip()
+                if re.match(r"^\d+\.\d+\.\d+\.\d+$", stripped):
+                    servers.append(stripped)
+                    continue
+
+                if not stripped:
+                    break
+
+    resolv_conf = "/etc/resolv.conf"
+    if os.path.exists(resolv_conf):
+        try:
+            with open(resolv_conf, "r", encoding="utf-8", errors="ignore") as resolv:
+                for line in resolv:
+                    if line.startswith("nameserver"):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            servers.append(parts[1].strip())
+        except OSError:
+            pass
+
+    return list(dict.fromkeys(server for server in servers if server))
+
 def scan(ip):
     print("[%s][>] Scanning %s ..." % (time.strftime("%H:%M:%S", time.localtime()), ip))
     hosts = {}
@@ -114,6 +166,10 @@ def scan(ip):
         "smb-os-discovery",
         ip,
     ]
+
+    if DNS_SERVERS:
+        cmd[1:1] = ["--dns-servers", ",".join(DNS_SERVERS)]
+        print("[!] Using custom DNS servers: %s" % ", ".join(DNS_SERVERS))
     for line in subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True).stdout.read().splitlines():
         if line.startswith('Nmap scan report for '):
             if line.count('(') == 1 and line.count(')') == 1:
@@ -176,6 +232,10 @@ if __name__ == "__main__":
         except FileNotFoundError as exc:
             print("[!] %s" % exc)
             sys.exit(1)
+
+        DNS_SERVERS = discover_dns_servers()
+        if not DNS_SERVERS:
+            print("[!] DNS servers were not detected automatically; nmap will rely on its defaults.")
 
         print("[%s][!] Parsing default routes ..." % time.strftime("%H:%M:%S", time.localtime()))
         default_routes, default_data = get_routes(str(subprocess.check_output("route print -4")))
