@@ -98,6 +98,31 @@ def clear_subnets(ips):
     return ips
 
 
+def resolve_alive_sweep_settings():
+    """Return (workers, delay) for alive host discovery with optional env overrides."""
+
+    default_workers = min(256, max(1, multiprocessing.cpu_count() * 4))
+    default_delay = 0.0
+
+    env_workers = os.environ.get("ALIVE_WORKERS")
+    env_delay = os.environ.get("ALIVE_BATCH_DELAY")
+
+    workers = default_workers
+    if env_workers:
+        try:
+            workers = max(1, min(int(env_workers), 512))
+        except ValueError:
+            print("[!] Invalid ALIVE_WORKERS value; using default: %s" % default_workers)
+
+    try:
+        batch_delay = max(0.0, float(env_delay)) if env_delay is not None else default_delay
+    except ValueError:
+        print("[!] Invalid ALIVE_BATCH_DELAY value; using default: %.2f" % default_delay)
+        batch_delay = default_delay
+
+    return workers, batch_delay
+
+
 def confirm_scan(routes):
     """Ask the user to confirm scanning the discovered routes."""
 
@@ -197,42 +222,74 @@ def discover_alive_hosts(routes):
     except FileNotFoundError:
         pass
 
-    total_hosts = sum(1 for route in routes for _ in ipaddress.ip_network(route, strict=False).hosts())
+    hosts_to_scan = [str(ip) for route in routes for ip in ipaddress.ip_network(route, strict=False).hosts()]
+    total_hosts = len(hosts_to_scan)
     scanned_hosts = 0
+    alive_hosts = []
 
     print(
         "[%s][*] Searching for alive hosts across %s routes (%s hosts total) ..."
         % (time.strftime("%H:%M:%S", time.localtime()), len(routes), total_hosts)
     )
 
-    for route in routes:
-        network = ipaddress.ip_network(route, strict=False)
-        for ip in network.hosts():
-            cmd = [NMAP_CMD, "-sn", "-PR", str(ip)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            scanned_hosts += 1
+    workers, batch_delay = resolve_alive_sweep_settings()
+    print(
+        "[%s][*] Launching ping sweep with %s parallel workers%s ..."
+        % (
+            time.strftime("%H:%M:%S", time.localtime()),
+            workers,
+            " and %.2fs pacing" % batch_delay if batch_delay else "",
+        )
+    )
 
-            if scanned_hosts == total_hosts or scanned_hosts % 10 == 0:
-                remaining = total_hosts - scanned_hosts
-                print(
-                    "\r[%s][*] Progress: %s/%s scanned, %s remaining"
-                    % (
-                        time.strftime("%H:%M:%S", time.localtime()),
-                        scanned_hosts,
-                        total_hosts,
-                        remaining,
-                    ),
-                    end="",
-                    flush=True,
-                )
+    try:
+        with multiprocessing.Pool(
+            workers, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
+        ) as pool:
+            for scanned_hosts, result in enumerate(
+                pool.imap_unordered(ping_host, hosts_to_scan), start=1
+            ):
+                if result:
+                    alive_hosts.append(result)
 
-            if "Host is up" in result.stdout:
-                with open(output_path, "a") as alive_file:
-                    alive_file.write(f"{ip}\n")
+                if scanned_hosts == total_hosts or scanned_hosts % 20 == 0:
+                    remaining = total_hosts - scanned_hosts
+                    print(
+                        "\r[%s][*] Progress: %s/%s scanned, %s remaining"
+                        % (
+                            time.strftime("%H:%M:%S", time.localtime()),
+                            scanned_hosts,
+                            total_hosts,
+                            remaining,
+                        ),
+                        end="",
+                        flush=True,
+                    )
+                    if batch_delay:
+                        time.sleep(batch_delay)
+    except KeyboardInterrupt:
+        print("\n[!] User interrupted alive host discovery; stopping worker pool ...")
+        raise
 
     print()
 
+    if alive_hosts:
+        alive_hosts.sort()
+        with open(output_path, "w") as alive_file:
+            alive_file.write("\n".join(alive_hosts) + "\n")
+
     print("[%s][+] Alive host discovery complete; results saved to %s." % (time.strftime("%H:%M:%S", time.localtime()), output_path))
+
+
+def ping_host(ip):
+    """Probe a single host with nmap ping scan and return the IP if alive."""
+
+    if not NMAP_CMD:
+        return None
+
+    cmd = [NMAP_CMD, "-sn", "-PR", str(ip)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return str(ip) if "Host is up" in result.stdout else None
 
 def scan(ip):
     if not NMAP_CMD:
