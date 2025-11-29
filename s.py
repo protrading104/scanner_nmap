@@ -139,16 +139,17 @@ def choose_action():
 
     prompt = (
         "[%s][?] Select an action:\n"
+        "   0. Stop and exit\n"
         "   1. Run alive host discovery\n"
         "   2. Run port and vulnerability scan\n"
-        "Enter 1 or 2: "
+        "Enter 0, 1 or 2: "
     ) % time.strftime("%H:%M:%S", time.localtime())
 
     while True:
         answer = input(prompt).strip()
-        if answer in ("1", "2"):
+        if answer in ("0", "1", "2"):
             return answer
-        print("Please enter 1 or 2.")
+        print("Please enter 0, 1 or 2.")
 
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
@@ -421,6 +422,9 @@ if __name__ == "__main__":
                     for route in routes:
                         print('   > %s' % route)
                     action = choose_action()
+                    if action == "0":
+                        print("[%s][-] Scan cancelled by user request." % time.strftime("%H:%M:%S", time.localtime()))
+                        sys.exit(0)
                     if action == "1":
                         discover_alive_hosts(routes)
                         old_data = new_data
