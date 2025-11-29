@@ -138,17 +138,17 @@ def choose_action():
     """Show an interactive menu after route discovery and return the user's choice."""
 
     prompt = (
-        "[%s][?] Выберите действие:\n"
-        "   1. Запуск поиска активных хостов\n"
-        "   2. Сканирование портов\n"
-        "Введите 1 или 2: "
+        "[%s][?] Select an action:\n"
+        "   1. Run alive host discovery\n"
+        "   2. Run port and vulnerability scan\n"
+        "Enter 1 or 2: "
     ) % time.strftime("%H:%M:%S", time.localtime())
 
     while True:
         answer = input(prompt).strip()
         if answer in ("1", "2"):
             return answer
-        print("Пожалуйста, введите 1 или 2.")
+        print("Please enter 1 or 2.")
 
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
