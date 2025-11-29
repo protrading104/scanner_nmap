@@ -197,16 +197,40 @@ def discover_alive_hosts(routes):
     except FileNotFoundError:
         pass
 
-    print("[%s][*] Searching for alive hosts across %s routes ..." % (time.strftime("%H:%M:%S", time.localtime()), len(routes)))
+    total_hosts = sum(1 for route in routes for _ in ipaddress.ip_network(route, strict=False).hosts())
+    scanned_hosts = 0
+
+    print(
+        "[%s][*] Searching for alive hosts across %s routes (%s hosts total) ..."
+        % (time.strftime("%H:%M:%S", time.localtime()), len(routes), total_hosts)
+    )
 
     for route in routes:
         network = ipaddress.ip_network(route, strict=False)
         for ip in network.hosts():
             cmd = [NMAP_CMD, "-sn", "-PR", str(ip)]
             result = subprocess.run(cmd, capture_output=True, text=True)
+            scanned_hosts += 1
+
+            if scanned_hosts == total_hosts or scanned_hosts % 10 == 0:
+                remaining = total_hosts - scanned_hosts
+                print(
+                    "\r[%s][*] Progress: %s/%s scanned, %s remaining"
+                    % (
+                        time.strftime("%H:%M:%S", time.localtime()),
+                        scanned_hosts,
+                        total_hosts,
+                        remaining,
+                    ),
+                    end="",
+                    flush=True,
+                )
+
             if "Host is up" in result.stdout:
                 with open(output_path, "a") as alive_file:
                     alive_file.write(f"{ip}\n")
+
+    print()
 
     print("[%s][+] Alive host discovery complete; results saved to %s." % (time.strftime("%H:%M:%S", time.localtime()), output_path))
 
