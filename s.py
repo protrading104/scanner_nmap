@@ -112,6 +112,16 @@ def confirm_scan(routes):
             return answer == "y"
         print("Please enter 'y' to confirm or 'n' to cancel.")
 
+
+def confirm_startup():
+    """Ask for confirmation before starting the monitoring loop."""
+
+    while True:
+        answer = input("[?] Start route monitoring and scanning? (y/N): ").strip().lower()
+        if answer in ("y", "n", ""):
+            return answer == "y"
+        print("Please enter 'y' to confirm or 'n' to cancel.")
+
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
     bar_length = 30
@@ -173,6 +183,32 @@ def discover_dns_servers():
             pass
 
     return list(dict.fromkeys(server for server in servers if server))
+
+
+def discover_alive_hosts(routes):
+    """Run an ICMP ping sweep across all discovered routes and record alive hosts."""
+
+    if not NMAP_CMD:
+        raise RuntimeError("Nmap executable path is not configured in worker process")
+
+    output_path = "alive_hosts.txt"
+    try:
+        os.remove(output_path)
+    except FileNotFoundError:
+        pass
+
+    print("[%s][*] Searching for alive hosts across %s routes ..." % (time.strftime("%H:%M:%S", time.localtime()), len(routes)))
+
+    for route in routes:
+        network = ipaddress.ip_network(route, strict=False)
+        for ip in network.hosts():
+            cmd = [NMAP_CMD, "-sn", "-PR", str(ip)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if "Host is up" in result.stdout:
+                with open(output_path, "a") as alive_file:
+                    alive_file.write(f"{ip}\n")
+
+    print("[%s][+] Alive host discovery complete; results saved to %s." % (time.strftime("%H:%M:%S", time.localtime()), output_path))
 
 def scan(ip):
     if not NMAP_CMD:
@@ -268,6 +304,11 @@ if __name__ == "__main__":
         old_data = default_data
         for i in default_routes:
             print('   > %s' % i)
+
+        if not confirm_startup():
+            print("[%s][-] Startup cancelled by user." % time.strftime("%H:%M:%S", time.localtime()))
+            sys.exit(0)
+
         while True:
             print("[%s][*] Waiting for route changes ..." % time.strftime("%H:%M:%S", time.localtime()))
             time.sleep(1)
@@ -295,6 +336,7 @@ if __name__ == "__main__":
                     print("[%s][*] Final routes to scan:" % time.strftime("%H:%M:%S", time.localtime()))
                     for route in routes:
                         print('   > %s' % route)
+                    discover_alive_hosts(routes)
                     if not confirm_scan(routes):
                         print("[%s][-] Scan cancelled; waiting for further route changes." % time.strftime("%H:%M:%S", time.localtime()))
                         old_data = new_data
