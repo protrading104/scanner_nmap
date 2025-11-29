@@ -123,21 +123,6 @@ def resolve_alive_sweep_settings():
     return workers, batch_delay
 
 
-def confirm_scan(routes):
-    """Ask the user to confirm scanning the discovered routes."""
-
-    prompt = "[%s][?] Start scanning %s routes? (y/N): " % (
-        time.strftime("%H:%M:%S", time.localtime()),
-        len(routes),
-    )
-
-    while True:
-        answer = input(prompt).strip().lower()
-        if answer in ("y", "n", ""):
-            return answer == "y"
-        print("Please enter 'y' to confirm or 'n' to cancel.")
-
-
 def confirm_startup():
     """Ask for confirmation before starting the monitoring loop."""
 
@@ -146,6 +131,24 @@ def confirm_startup():
         if answer in ("y", "n", ""):
             return answer == "y"
         print("Please enter 'y' to confirm or 'n' to cancel.")
+
+
+
+def choose_action():
+    """Show an interactive menu after route discovery and return the user's choice."""
+
+    prompt = (
+        "[%s][?] Выберите действие:\n"
+        "   1. Запуск поиска активных хостов\n"
+        "   2. Сканирование портов\n"
+        "Введите 1 или 2: "
+    ) % time.strftime("%H:%M:%S", time.localtime())
+
+    while True:
+        answer = input(prompt).strip()
+        if answer in ("1", "2"):
+            return answer
+        print("Пожалуйста, введите 1 или 2.")
 
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
@@ -417,11 +420,12 @@ if __name__ == "__main__":
                     print("[%s][*] Final routes to scan:" % time.strftime("%H:%M:%S", time.localtime()))
                     for route in routes:
                         print('   > %s' % route)
-                    discover_alive_hosts(routes)
-                    if not confirm_scan(routes):
-                        print("[%s][-] Scan cancelled; waiting for further route changes." % time.strftime("%H:%M:%S", time.localtime()))
+                    action = choose_action()
+                    if action == "1":
+                        discover_alive_hosts(routes)
                         old_data = new_data
                         continue
+                    # action == "2": выполнить сканирование портов
                     total_routes = len(routes)
                     if len(routes) == 1:
                         print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), routes[0]))
