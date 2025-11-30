@@ -492,14 +492,7 @@ if __name__ == "__main__":
                 else:
                     new_routes = [route for route in routes if route not in current_routes]
                     if not new_routes:
-                        removed_routes = [route for route in current_routes if route not in routes]
-                        if removed_routes:
-                            print("[%s][-] Routes removed, no new routes added:" % time.strftime("%H:%M:%S", time.localtime()))
-                            for route in removed_routes:
-                                print('   > %s' % route)
-                        else:
-                            print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
-                        current_routes = list(routes)
+
                         old_data = new_data
                         continue
 
