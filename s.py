@@ -395,7 +395,24 @@ def get_routes(routes_output):
                     diaps.append(str(network))
     else:
         for line in lines:
-            if not line or line.startswith("default"):
+            if not line:
+                continue
+
+            if line.startswith("default"):
+                # If the only change is a default route (common for PPP/VPN links),
+                # capture the gateway as a /32 so we can still treat it as a new
+                # reachable host. This avoids ignoring interfaces that only add
+                # a default route without advertising specific networks.
+                parts = line.split()
+                if "via" in parts:
+                    via_index = parts.index("via") + 1
+                    if via_index < len(parts):
+                        gateway = parts[via_index]
+                        if re.match(r"^\d+\.\d+\.\d+\.\d+$", gateway):
+                            candidate = f"{gateway}/32"
+                            if candidate not in diaps:
+                                diaps.append(candidate)
+                # Skip further processing of this default route entry.
                 continue
 
             parts = line.split()
@@ -475,7 +492,7 @@ if __name__ == "__main__":
                 else:
                     new_routes = [route for route in routes if route not in current_routes]
                     if not new_routes:
-                        print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
+
                         old_data = new_data
                         continue
 
