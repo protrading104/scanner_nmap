@@ -404,7 +404,13 @@ def get_routes(routes_output):
 
             candidate = parts[0]
             if "/" not in candidate:
-                continue
+                # Linux adds host routes for point-to-point interfaces (e.g. PPP)
+                # in the form of a plain IP without CIDR notation. Treat them as
+                # /32 networks so they can be picked up for scanning.
+                if re.match(r"^\d+\.\d+\.\d+\.\d+$", candidate):
+                    candidate = f"{candidate}/32"
+                else:
+                    continue
 
             try:
                 network = ipaddress.IPv4Network(candidate, strict=False)
@@ -466,13 +472,15 @@ if __name__ == "__main__":
                     print("[%s][!] Default route configuration restored!" % time.strftime("%H:%M:%S", time.localtime()))
                     current_routes = list(default_routes)
                     old_data = new_data
-                elif routes == current_routes:
-                    print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
-                    old_data = new_data
                 else:
+                    new_routes = [route for route in routes if route not in current_routes]
+                    if not new_routes:
+                        print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
+                        old_data = new_data
+                        continue
+
                     print("[%s][+] Changes detected, following routes added:" % time.strftime("%H:%M:%S", time.localtime()))
-                    extra_routes = [route for route in routes if route not in default_routes]
-                    extra_routes = clear_subnets(extra_routes)
+                    extra_routes = clear_subnets(new_routes)
                     for i in ress:
                         try:
                             os.remove('%s.txt' % i)
