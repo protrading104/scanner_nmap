@@ -360,19 +360,79 @@ def parse_res(var, string1, string2):
     except:
         print("[-] 0 %s" % string2)
 
-def get_routes(routes):
+def get_routes(routes_output):
+    """Extract IPv4 network routes from Windows or Linux route output."""
+
     diaps = []
-    ro = False
-    for i in str(routes).split('\\r\\n'):
-        if i.count('.') >= 9 and ro == True:
-            s = i.split(' ')
-            while s.count('') != 0:
-                s.remove('')
-            if s[1] != '255.255.255.255' and s[1] != '240.0.0.0' and s[0] != '0.0.0.0' and s[1] != '0.0.0.0' and s[0] != '127.0.0.0' and diaps.count(str(ipaddress.IPv4Network('%s/%s' % (s[0], s[1]), False))) == 0 and s[0].startswith('169.') == False and s[0].startswith('10.212.134') == False:
-                diaps.append(str(ipaddress.IPv4Network('%s/%s' % (s[0], s[1]), False)))
-        elif ro == False and i.count('IPv4 Route Table') == 1:
-            ro = True
-    return diaps, routes
+    lines = str(routes_output).splitlines()
+
+    is_windows_output = any("IPv4 Route Table" in line for line in lines)
+
+    if is_windows_output:
+        parsing = False
+        for line in lines:
+            if not parsing and "IPv4 Route Table" in line:
+                parsing = True
+                continue
+
+            if parsing and line.count(".") >= 3:
+                parts = [part for part in line.split(" ") if part]
+                if len(parts) < 2:
+                    continue
+
+                destination, netmask = parts[0], parts[1]
+
+                if (
+                    destination in ("0.0.0.0", "127.0.0.0")
+                    or netmask in ("0.0.0.0", "240.0.0.0", "255.255.255.255")
+                    or destination.startswith("169.")
+                    or destination.startswith("10.212.134")
+                ):
+                    continue
+
+                network = ipaddress.IPv4Network(f"{destination}/{netmask}", strict=False)
+                if str(network) not in diaps:
+                    diaps.append(str(network))
+    else:
+        for line in lines:
+            if not line or line.startswith("default"):
+                continue
+
+            parts = line.split()
+            if not parts:
+                continue
+
+            candidate = parts[0]
+            if "/" not in candidate:
+                continue
+
+            try:
+                network = ipaddress.IPv4Network(candidate, strict=False)
+            except ValueError:
+                continue
+
+            if (
+                network == ipaddress.IPv4Network("0.0.0.0/0")
+                or network.is_loopback
+                or network.is_link_local
+            ):
+                continue
+
+            if str(network) not in diaps:
+                diaps.append(str(network))
+
+    return diaps, routes_output
+
+
+def get_route_output():
+    """Return the platform-appropriate route table output as text."""
+
+    if os.name == "nt":
+        command = ["route", "print", "-4"]
+    else:
+        command = ["ip", "-4", "route", "list"]
+
+    return subprocess.check_output(command, text=True, errors="ignore")
 
 if __name__ == "__main__":
     try:
@@ -387,7 +447,7 @@ if __name__ == "__main__":
             print("[!] DNS servers were not detected automatically; nmap will rely on its defaults.")
 
         print("[%s][!] Parsing default routes ..." % time.strftime("%H:%M:%S", time.localtime()))
-        default_routes, default_data = get_routes(str(subprocess.check_output("route print -4")))
+        default_routes, default_data = get_routes(get_route_output())
         old_data = default_data
         for i in default_routes:
             print('   > %s' % i)
@@ -399,7 +459,7 @@ if __name__ == "__main__":
         while True:
             print("[%s][*] Waiting for route changes ..." % time.strftime("%H:%M:%S", time.localtime()))
             time.sleep(1)
-            routes, new_data = get_routes(str(subprocess.check_output("route print -4")))
+            routes, new_data = get_routes(get_route_output())
             if new_data != old_data:
                 if default_data == new_data:
                     print("[%s][!] Default route configuration restored!" % time.strftime("%H:%M:%S", time.localtime()))
