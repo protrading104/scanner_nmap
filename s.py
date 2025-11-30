@@ -395,7 +395,24 @@ def get_routes(routes_output):
                     diaps.append(str(network))
     else:
         for line in lines:
-            if not line or line.startswith("default"):
+            if not line:
+                continue
+
+            if line.startswith("default"):
+                # If the only change is a default route (common for PPP/VPN links),
+                # capture the gateway as a /32 so we can still treat it as a new
+                # reachable host. This avoids ignoring interfaces that only add
+                # a default route without advertising specific networks.
+                parts = line.split()
+                if "via" in parts:
+                    via_index = parts.index("via") + 1
+                    if via_index < len(parts):
+                        gateway = parts[via_index]
+                        if re.match(r"^\d+\.\d+\.\d+\.\d+$", gateway):
+                            candidate = f"{gateway}/32"
+                            if candidate not in diaps:
+                                diaps.append(candidate)
+                # Skip further processing of this default route entry.
                 continue
 
             parts = line.split()
@@ -404,7 +421,13 @@ def get_routes(routes_output):
 
             candidate = parts[0]
             if "/" not in candidate:
-                continue
+                # Linux adds host routes for point-to-point interfaces (e.g. PPP)
+                # in the form of a plain IP without CIDR notation. Treat them as
+                # /32 networks so they can be picked up for scanning.
+                if re.match(r"^\d+\.\d+\.\d+\.\d+$", candidate):
+                    candidate = f"{candidate}/32"
+                else:
+                    continue
 
             try:
                 network = ipaddress.IPv4Network(candidate, strict=False)
@@ -466,13 +489,22 @@ if __name__ == "__main__":
                     print("[%s][!] Default route configuration restored!" % time.strftime("%H:%M:%S", time.localtime()))
                     current_routes = list(default_routes)
                     old_data = new_data
-                elif routes == current_routes:
-                    print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
-                    old_data = new_data
                 else:
+                    new_routes = [route for route in routes if route not in current_routes]
+                    if not new_routes:
+                        removed_routes = [route for route in current_routes if route not in routes]
+                        if removed_routes:
+                            print("[%s][-] Routes removed, no new routes added:" % time.strftime("%H:%M:%S", time.localtime()))
+                            for route in removed_routes:
+                                print('   > %s' % route)
+                        else:
+                            print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
+                        current_routes = list(routes)
+                        old_data = new_data
+                        continue
+
                     print("[%s][+] Changes detected, following routes added:" % time.strftime("%H:%M:%S", time.localtime()))
-                    extra_routes = [route for route in routes if route not in default_routes]
-                    extra_routes = clear_subnets(extra_routes)
+                    extra_routes = clear_subnets(new_routes)
                     for i in ress:
                         try:
                             os.remove('%s.txt' % i)
