@@ -448,6 +448,7 @@ if __name__ == "__main__":
 
         print("[%s][!] Parsing default routes ..." % time.strftime("%H:%M:%S", time.localtime()))
         default_routes, default_data = get_routes(get_route_output())
+        current_routes = list(default_routes)
         old_data = default_data
         for i in default_routes:
             print('   > %s' % i)
@@ -463,44 +464,45 @@ if __name__ == "__main__":
             if new_data != old_data:
                 if default_data == new_data:
                     print("[%s][!] Default route configuration restored!" % time.strftime("%H:%M:%S", time.localtime()))
-                    old_data = default_data
-                elif default_routes == routes:
+                    current_routes = list(default_routes)
+                    old_data = new_data
+                elif routes == current_routes:
                     print("[%s][-] Changes detected, but no new routes added!" % time.strftime("%H:%M:%S", time.localtime()))
-                    old_data = default_data
-                elif default_routes != routes:
+                    old_data = new_data
+                else:
                     print("[%s][+] Changes detected, following routes added:" % time.strftime("%H:%M:%S", time.localtime()))
-                    for i in default_routes:
-                        routes.remove(i)
-                    routes = clear_subnets(routes)
+                    extra_routes = [route for route in routes if route not in default_routes]
+                    extra_routes = clear_subnets(extra_routes)
                     for i in ress:
                         try:
                             os.remove('%s.txt' % i)
                         except:
                             pass
-                    for i in routes:
+                    for i in extra_routes:
                         print('   > %s' % i)
-                    routes = parallel_routes(routes)
+                    extra_routes = parallel_routes(extra_routes)
                     print("[%s][*] Final routes to scan:" % time.strftime("%H:%M:%S", time.localtime()))
-                    for route in routes:
+                    for route in extra_routes:
                         print('   > %s' % route)
                     action = choose_action()
                     if action == "0":
                         print("[%s][-] Scan cancelled by user request." % time.strftime("%H:%M:%S", time.localtime()))
                         sys.exit(0)
                     if action == "1":
-                        discover_alive_hosts(routes)
+                        discover_alive_hosts(extra_routes)
+                        current_routes = list(routes)
                         old_data = new_data
                         continue
                     # action == "2": выполнить сканирование портов
-                    total_routes = len(routes)
-                    if len(routes) == 1:
-                        print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), routes[0]))
+                    total_routes = len(extra_routes)
+                    if len(extra_routes) == 1:
+                        print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), extra_routes[0]))
                         render_progress(0, total_routes)
-                        scan(routes[0])
-                        render_progress(total_routes, total_routes, routes[0])
+                        scan(extra_routes[0])
+                        render_progress(total_routes, total_routes, extra_routes[0])
                     else:
-                        if len(routes) < 60:
-                            threads =  len(routes)
+                        if len(extra_routes) < 60:
+                            threads =  len(extra_routes)
                         else:
                             threads = 60
                         print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
@@ -510,7 +512,7 @@ if __name__ == "__main__":
                         )
                         try:
                             for idx, finished_ip in enumerate(
-                                p.imap_unordered(scan_with_label, routes), start=1
+                                p.imap_unordered(scan_with_label, extra_routes), start=1
                             ):
                                 render_progress(idx, total_routes, finished_ip)
                         except KeyboardInterrupt:
@@ -523,6 +525,7 @@ if __name__ == "__main__":
                             p.join()
                     for i in ress:
                         parse_res(i, ress[i]["good"], ress[i]["bad"])
+                    current_routes = list(routes)
                     old_data = new_data
     except KeyboardInterrupt:
         print("User interrupted!\t\t\t\t\t")
