@@ -404,7 +404,13 @@ def get_routes(routes_output):
 
             candidate = parts[0]
             if "/" not in candidate:
-                continue
+                # Linux adds host routes for point-to-point interfaces (e.g. PPP)
+                # in the form of a plain IP without CIDR notation. Treat them as
+                # /32 networks so they can be picked up for scanning.
+                if re.match(r"^\d+\.\d+\.\d+\.\d+$", candidate):
+                    candidate = f"{candidate}/32"
+                else:
+                    continue
 
             try:
                 network = ipaddress.IPv4Network(candidate, strict=False)
