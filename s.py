@@ -286,6 +286,8 @@ def check_port_88_from_alive_hosts():
     )
 
     open_hosts = []
+    total_hosts = len(hosts)
+    scanned_hosts = 0
 
     for host in hosts:
         cmd = [
@@ -317,6 +319,21 @@ def check_port_88_from_alive_hosts():
 
         if "88/tcp" in result.stdout and "open" in result.stdout:
             open_hosts.append(host)
+
+        scanned_hosts += 1
+        remaining = total_hosts - scanned_hosts
+        print(
+            "\r[%s][*] Progress: %s/%s scanned, %s remaining" % (
+                time.strftime("%H:%M:%S", time.localtime()),
+                scanned_hosts,
+                total_hosts,
+                remaining,
+            ),
+            end="",
+            flush=True,
+        )
+
+    print()
 
     if open_hosts:
         print("[%s][+] Hosts with open port 88:" % time.strftime("%H:%M:%S", time.localtime()))
