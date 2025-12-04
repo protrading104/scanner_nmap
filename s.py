@@ -103,7 +103,7 @@ def clear_subnets(ips):
 def resolve_alive_sweep_settings():
     """Return (workers, delay) for alive host discovery with optional env overrides."""
 
-    default_workers = min(256, max(1, multiprocessing.cpu_count() * 4))
+    default_workers = 64
     default_delay = 0.0
 
     env_workers = os.environ.get("ALIVE_WORKERS")
