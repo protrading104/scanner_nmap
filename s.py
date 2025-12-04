@@ -2,12 +2,13 @@
 
 import ipaddress
 import os
+import random
+import re
 import shutil
 import subprocess
 import sys
 import time
 import multiprocessing
-import re
 
 from rw import *
 
@@ -36,14 +37,52 @@ def resolve_nmap_path():
 
 NMAP_CMD = None
 DNS_SERVERS = []
+ALIVE_SCAN_DELAY = "500ms"
+SPOOF_MAC = None
+SPOOF_SOURCE_IP = None
 
 
-def init_worker(nmap_cmd, dns_servers):
+def init_worker(nmap_cmd, dns_servers, scan_delay=None, spoof_mac=None, source_ip=None):
     """Configure global settings inside worker processes."""
 
-    global NMAP_CMD, DNS_SERVERS
+    global NMAP_CMD, DNS_SERVERS, ALIVE_SCAN_DELAY, SPOOF_MAC, SPOOF_SOURCE_IP
     NMAP_CMD = nmap_cmd
     DNS_SERVERS = dns_servers
+    if scan_delay is not None:
+        ALIVE_SCAN_DELAY = scan_delay
+    if spoof_mac is not None:
+        SPOOF_MAC = spoof_mac
+    if source_ip is not None:
+        SPOOF_SOURCE_IP = source_ip
+
+
+def random_mac(prefix=None):
+    """Generate a random MAC address, optionally using the provided OUI prefix."""
+
+    def random_byte():
+        return f"{random.randint(0x00, 0xFF):02x}"
+
+    if prefix:
+        cleaned = prefix.replace("-", ":").lower()
+        parts = cleaned.split(":")
+        if len(parts) != 3 or any(len(p) != 2 for p in parts):
+            raise ValueError("Prefix must look like 'aa:bb:cc'")
+        base = parts
+    else:
+        base = [random_byte() for _ in range(3)]
+
+    tail = [random_byte() for _ in range(3)]
+    return ":".join(base + tail)
+
+
+def random_source_ip(network):
+    """Return a random usable host address from the given network."""
+
+    net = ipaddress.ip_network(network, strict=False)
+    candidates = [ip for ip in net.hosts()]
+    if not candidates:
+        raise ValueError(f"Network {network} has no usable hosts")
+    return str(random.choice(candidates))
 
 ress = {
 "rdp": {"good": "Hosts with open RDP", "bad": "Hosts have RDP port open.", "innmap": "yes", "condition": "3389", "state": "open", "message": "no", "additional": "no"},
@@ -123,6 +162,53 @@ def resolve_alive_sweep_settings():
         batch_delay = default_delay
 
     return workers, batch_delay
+
+
+def resolve_alive_scan_delay():
+    """Return the nmap --scan-delay value for alive host discovery."""
+
+    default_delay = "500ms"
+    env_delay = os.environ.get("ALIVE_SCAN_DELAY")
+
+    if env_delay is None:
+        return default_delay
+
+    cleaned = env_delay.strip()
+    if not cleaned:
+        print("[!] ALIVE_SCAN_DELAY is empty; falling back to default: %s" % default_delay)
+        return default_delay
+
+    return cleaned
+
+
+def resolve_spoofing_settings():
+    """Resolve MAC and source IP spoofing settings from environment variables."""
+
+    random_mac_flag = os.environ.get("ALIVE_RANDOM_MAC")
+    mac_prefix = os.environ.get("ALIVE_MAC_PREFIX")
+    source_ip = os.environ.get("ALIVE_SOURCE_IP")
+    source_net = os.environ.get("ALIVE_SOURCE_NET")
+
+    spoof_mac = None
+    spoof_source_ip = None
+
+    try:
+        if (random_mac_flag and random_mac_flag.lower() not in ("0", "false", "no")) or mac_prefix:
+            spoof_mac = random_mac(mac_prefix)
+    except ValueError as exc:
+        print("[!] Invalid ALIVE_MAC_PREFIX: %s; MAC spoofing disabled" % exc)
+        spoof_mac = None
+
+    try:
+        if source_ip:
+            spoof_source_ip = source_ip.strip()
+        elif source_net:
+            spoof_source_ip = random_source_ip(source_net)
+    except ValueError as exc:
+        print("[!] Invalid ALIVE_SOURCE_NET: %s; source IP spoofing disabled" % exc)
+        spoof_source_ip = None
+
+    return spoof_mac, spoof_source_ip
 
 
 def confirm_startup():
@@ -239,6 +325,14 @@ def discover_alive_hosts(routes):
     )
 
     workers, batch_delay = resolve_alive_sweep_settings()
+    scan_delay = resolve_alive_scan_delay()
+    spoof_mac, spoof_source_ip = resolve_spoofing_settings()
+
+    global ALIVE_SCAN_DELAY, SPOOF_MAC, SPOOF_SOURCE_IP
+    ALIVE_SCAN_DELAY = scan_delay
+    SPOOF_MAC = spoof_mac
+    SPOOF_SOURCE_IP = spoof_source_ip
+
     print(
         "[%s][*] Launching ping sweep with %s parallel workers%s ..."
         % (
@@ -248,9 +342,19 @@ def discover_alive_hosts(routes):
         )
     )
 
+    print("[%s][*] Using nmap --scan-delay %s" % (time.strftime("%H:%M:%S", time.localtime()), scan_delay))
+    if SPOOF_MAC:
+        print("[%s][!] Spoofing MAC address: %s" % (time.strftime("%H:%M:%S", time.localtime()), SPOOF_MAC))
+    if SPOOF_SOURCE_IP:
+        print(
+            "[%s][!] Spoofing source IP: %s" % (time.strftime("%H:%M:%S", time.localtime()), SPOOF_SOURCE_IP)
+        )
+
     try:
         with multiprocessing.Pool(
-            workers, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
+            workers,
+            initializer=init_worker,
+            initargs=(NMAP_CMD, DNS_SERVERS, ALIVE_SCAN_DELAY, SPOOF_MAC, SPOOF_SOURCE_IP),
         ) as pool:
             for scanned_hosts, result in enumerate(
                 pool.imap_unordered(ping_host, hosts_to_scan), start=1
@@ -293,7 +397,14 @@ def ping_host(ip):
     if not NMAP_CMD:
         return None
 
-    cmd = [NMAP_CMD, "-sn", "-PR", "--scan-delay", "500ms", str(ip)]
+    cmd = [NMAP_CMD, "-sn", "-PR", "--scan-delay", ALIVE_SCAN_DELAY, str(ip)]
+
+    if SPOOF_MAC:
+        cmd.extend(["--spoof-mac", SPOOF_MAC])
+
+    if SPOOF_SOURCE_IP:
+        cmd.extend(["-S", SPOOF_SOURCE_IP])
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     return str(ip) if "Host is up" in result.stdout else None
 
