@@ -398,12 +398,18 @@ def discover_alive_hosts(routes):
 
     print()
 
-    if alive_hosts:
-        alive_hosts.sort()
-        with open(output_path, "w") as alive_file:
+    alive_count = len(alive_hosts)
+    alive_hosts.sort()
+    with open(output_path, "w") as alive_file:
+        if alive_hosts:
             alive_file.write("\n".join(alive_hosts) + "\n")
 
-    print("[%s][+] Alive host discovery complete; results saved to %s." % (time.strftime("%H:%M:%S", time.localtime()), output_path))
+    print(
+        "[%s][+] Alive host discovery complete: %s host(s) alive. Results saved to %s."
+        % (time.strftime("%H:%M:%S", time.localtime()), alive_count, output_path)
+    )
+
+    return alive_count
 
 
 def ping_host(ip):
@@ -635,47 +641,54 @@ if __name__ == "__main__":
                     print("[%s][*] Final routes to scan:" % time.strftime("%H:%M:%S", time.localtime()))
                     for route in extra_routes:
                         print('   > %s' % route)
-                    action = choose_action()
-                    if action == "0":
-                        print("[%s][-] Scan cancelled by user request." % time.strftime("%H:%M:%S", time.localtime()))
-                        sys.exit(0)
-                    if action == "1":
-                        discover_alive_hosts(extra_routes)
-                        current_routes = list(routes)
-                        old_data = new_data
-                        continue
-                    # action == "2": выполнить сканирование портов
-                    total_routes = len(extra_routes)
-                    if len(extra_routes) == 1:
-                        print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), extra_routes[0]))
-                        render_progress(0, total_routes)
-                        scan(extra_routes[0])
-                        render_progress(total_routes, total_routes, extra_routes[0])
-                    else:
-                        if len(extra_routes) < 60:
-                            threads =  len(extra_routes)
+                    while True:
+                        action = choose_action()
+                        if action == "0":
+                            print("[%s][-] Scan cancelled by user request." % time.strftime("%H:%M:%S", time.localtime()))
+                            sys.exit(0)
+
+                        if action == "1":
+                            alive_count = discover_alive_hosts(extra_routes)
+                            print(
+                                "[%s][*] Alive hosts found: %s. Returning to main menu."
+                                % (time.strftime("%H:%M:%S", time.localtime()), alive_count)
+                            )
+                            continue
+
+                        # action == "2": выполнить сканирование портов
+                        total_routes = len(extra_routes)
+                        if len(extra_routes) == 1:
+                            print("[%s][+] Launching single-threaded scan against %s ..." % (time.strftime("%H:%M:%S", time.localtime()), extra_routes[0]))
+                            render_progress(0, total_routes)
+                            scan(extra_routes[0])
+                            render_progress(total_routes, total_routes, extra_routes[0])
                         else:
-                            threads = 60
-                        print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
-                        render_progress(0, total_routes)
-                        p = multiprocessing.Pool(
-                            threads, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
-                        )
-                        try:
-                            for idx, finished_ip in enumerate(
-                                p.imap_unordered(scan_with_label, extra_routes), start=1
-                            ):
-                                render_progress(idx, total_routes, finished_ip)
-                        except KeyboardInterrupt:
-                            print("[!] User interrupted! Stopping active scans ...")
-                            p.terminate()
-                            p.join()
-                            sys.exit(1)
-                        else:
-                            p.close()
-                            p.join()
-                    for i in ress:
-                        parse_res(i, ress[i]["good"], ress[i]["bad"])
+                            if len(extra_routes) < 60:
+                                threads =  len(extra_routes)
+                            else:
+                                threads = 60
+                            print("[%s][+] Launching multithreader scan with %s threads against %s routes ..."  % (time.strftime("%H:%M:%S", time.localtime()), threads, total_routes))
+                            render_progress(0, total_routes)
+                            p = multiprocessing.Pool(
+                                threads, initializer=init_worker, initargs=(NMAP_CMD, DNS_SERVERS)
+                            )
+                            try:
+                                for idx, finished_ip in enumerate(
+                                    p.imap_unordered(scan_with_label, extra_routes), start=1
+                                ):
+                                    render_progress(idx, total_routes, finished_ip)
+                            except KeyboardInterrupt:
+                                print("[!] User interrupted! Stopping active scans ...")
+                                p.terminate()
+                                p.join()
+                                sys.exit(1)
+                            else:
+                                p.close()
+                                p.join()
+                        for i in ress:
+                            parse_res(i, ress[i]["good"], ress[i]["bad"])
+                        break
+
                     current_routes = list(routes)
                     old_data = new_data
     except KeyboardInterrupt:
