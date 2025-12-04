@@ -245,14 +245,88 @@ def choose_action():
         "   0. Stop and exit\n"
         "   1. Run alive host discovery\n"
         "   2. Run port and vulnerability scan\n"
-        "Enter 0, 1 or 2: "
+        "   3. Check port 88 from alive_hosts.txt\n"
+        "Enter 0, 1, 2 or 3: "
     ) % time.strftime("%H:%M:%S", time.localtime())
 
     while True:
         answer = input(prompt).strip()
-        if answer in ("0", "1", "2"):
+        if answer in ("0", "1", "2", "3"):
             return answer
-        print("Please enter 0, 1 or 2.")
+        print("Please enter 0, 1, 2 or 3.")
+
+
+def check_port_88_from_alive_hosts():
+    """Scan hosts from alive_hosts.txt for open TCP port 88 and print matches."""
+
+    if not NMAP_CMD:
+        raise RuntimeError("Nmap executable path is not configured in worker process")
+
+    alive_file = "alive_hosts.txt"
+    if not os.path.isfile(alive_file):
+        print(
+            "[%s][-] File %s not found. Run alive host discovery first."
+            % (time.strftime("%H:%M:%S", time.localtime()), alive_file)
+        )
+        return
+
+    with open(alive_file, "r") as hosts_file:
+        hosts = [line.strip() for line in hosts_file if line.strip()]
+
+    if not hosts:
+        print(
+            "[%s][-] No hosts to scan in %s. Run alive host discovery first."
+            % (time.strftime("%H:%M:%S", time.localtime()), alive_file)
+        )
+        return
+
+    print(
+        "[%s][*] Scanning %s host(s) for open TCP port 88 ..."
+        % (time.strftime("%H:%M:%S", time.localtime()), len(hosts))
+    )
+
+    open_hosts = []
+
+    for host in hosts:
+        cmd = [
+            NMAP_CMD,
+            "-Pn",
+            "-n",
+            "-p",
+            "88",
+            "--open",
+            "--source-port",
+            "53",
+            "--max-retries",
+            "1",
+            "--scan-delay",
+            "1000ms",
+            "--host-timeout",
+            "10s",
+            host,
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            print(
+                "[%s][-] Nmap executable not found while scanning %s."
+                % (time.strftime("%H:%M:%S", time.localtime()), host)
+            )
+            return
+
+        if "88/tcp" in result.stdout and "open" in result.stdout:
+            open_hosts.append(host)
+
+    if open_hosts:
+        print("[%s][+] Hosts with open port 88:" % time.strftime("%H:%M:%S", time.localtime()))
+        for host in open_hosts:
+            print("   > %s" % host)
+    else:
+        print(
+            "[%s][-] No hosts with open port 88 were found in %s."
+            % (time.strftime("%H:%M:%S", time.localtime()), alive_file)
+        )
 
 def render_progress(current, total, last_finished=None):
     percent = int((current / total) * 100) if total else 0
@@ -652,6 +726,14 @@ if __name__ == "__main__":
                             print(
                                 "[%s][*] Alive hosts found: %s. Returning to main menu."
                                 % (time.strftime("%H:%M:%S", time.localtime()), alive_count)
+                            )
+                            continue
+
+                        if action == "3":
+                            check_port_88_from_alive_hosts()
+                            print(
+                                "[%s][*] Port 88 check completed. Returning to main menu."
+                                % time.strftime("%H:%M:%S", time.localtime())
                             )
                             continue
 
