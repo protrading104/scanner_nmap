@@ -293,7 +293,7 @@ def ping_host(ip):
     if not NMAP_CMD:
         return None
 
-    cmd = [NMAP_CMD, "-sn", "-PR", str(ip)]
+    cmd = [NMAP_CMD, "-sn", "-PR", "--scan-delay", "500ms", str(ip)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return str(ip) if "Host is up" in result.stdout else None
 
