@@ -142,7 +142,14 @@ def clear_subnets(ips):
 def resolve_alive_sweep_settings():
     """Return (workers, delay) for alive host discovery with optional env overrides."""
 
-    default_workers = 64
+    # Windows multiprocessing pools cannot wait on more than 63 handles
+    # (WinAPI WaitForMultipleObjects limit). Keep the default and ceiling
+    # below that threshold to avoid ``ValueError: need at most 63 handles``
+    # when spawning worker processes on Windows.
+    windows_worker_cap = 61
+
+    default_workers = windows_worker_cap if os.name == "nt" else 64
+    max_workers = windows_worker_cap if os.name == "nt" else 512
     default_delay = 0.0
 
     env_workers = os.environ.get("ALIVE_WORKERS")
@@ -151,9 +158,17 @@ def resolve_alive_sweep_settings():
     workers = default_workers
     if env_workers:
         try:
-            workers = max(1, min(int(env_workers), 512))
+            workers = int(env_workers)
         except ValueError:
             print("[!] Invalid ALIVE_WORKERS value; using default: %s" % default_workers)
+        else:
+            if workers > max_workers:
+                print(
+                    "[!] ALIVE_WORKERS capped at %s on this platform (requested %s)"
+                    % (max_workers, workers)
+                )
+                workers = max_workers
+            workers = max(1, workers)
 
     try:
         batch_delay = max(0.0, float(env_delay)) if env_delay is not None else default_delay
